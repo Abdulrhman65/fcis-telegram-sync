@@ -1,0 +1,38 @@
+name: FCIS Telegram Sync
+
+on:
+  workflow_dispatch: # زر التشغيل اليدوي من GitHub
+  schedule:
+    - cron: '0 19 * * *' # تشغيل تلقائي يومياً الساعة 9 مساءً بتوقيت مصر (19:00 UTC)
+
+jobs:
+  sync:
+    name: Run Telegram Ingestion
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Execute Telegram Sync
+        env:
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+          TG_PHONE: ${{ secrets.TG_PHONE }}
+          TG_SESSION_STRING: ${{ secrets.TG_SESSION_STRING }}
+          TG_COMMUNITY: ${{ secrets.TG_COMMUNITY || 'FCISCommunity29' }}
+          FCIS_API_BASE: ${{ secrets.FCIS_API_BASE || 'http://fcishub.runasp.net/api' }}
+          FCIS_ADMIN_EMAIL: ${{ secrets.FCIS_ADMIN_EMAIL || 'admin@mans.edu.eg' }}
+          FCIS_ADMIN_PASSWORD: ${{ secrets.FCIS_ADMIN_PASSWORD || 'Admin@123456' }}
+          ADMIN_PERSONAL_TARGET: ${{ secrets.ADMIN_PERSONAL_TARGET || '+201027545916' }}
+        run: |
+          python main.py

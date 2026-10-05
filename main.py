@@ -6,6 +6,7 @@ import asyncio
 import logging
 from dotenv import load_dotenv
 from telethon import TelegramClient, events
+from telethon.sessions import StringSession
 
 from database import init_db, is_already_synced, record_synced
 from parser import parse_overview_message, extract_subject_info
@@ -173,8 +174,18 @@ async def main():
     api_client = FcisApiClient(FCIS_API_BASE, FCIS_ADMIN_EMAIL, FCIS_ADMIN_PASSWORD)
     api_client.login()
 
-    client = TelegramClient("userbot_session", int(TG_API_ID), TG_API_HASH)
-    await client.start(phone=TG_PHONE)
+    TG_SESSION_STRING = os.getenv("TG_SESSION_STRING")
+    if TG_SESSION_STRING:
+        client = TelegramClient(StringSession(TG_SESSION_STRING), int(TG_API_ID), TG_API_HASH)
+        await client.connect()
+        if not await client.is_user_authorized():
+            logger.error("Provided TG_SESSION_STRING is unauthorized or expired.")
+            sys.exit(1)
+        logger.info("Telegram Userbot authenticated via TG_SESSION_STRING!")
+    else:
+        client = TelegramClient("userbot_session", int(TG_API_ID), TG_API_HASH)
+        await client.start(phone=TG_PHONE)
+        logger.info("Telegram Userbot logged in successfully!")
 
     community_entity = await client.get_entity(TG_COMMUNITY)
 

@@ -23,12 +23,12 @@ load_dotenv()
 TG_API_ID = os.getenv("TG_API_ID")
 TG_API_HASH = os.getenv("TG_API_HASH")
 TG_PHONE = os.getenv("TG_PHONE")
-TG_COMMUNITY = os.getenv("TG_COMMUNITY", "FCISCommunity29")
+TG_COMMUNITY = os.getenv("TG_COMMUNITY") or "FCISCommunity29"
 
-FCIS_API_BASE = os.getenv("FCIS_API_BASE", "http://localhost:5000/api")
-FCIS_ADMIN_EMAIL = os.getenv("FCIS_ADMIN_EMAIL")
-FCIS_ADMIN_PASSWORD = os.getenv("FCIS_ADMIN_PASSWORD")
-ADMIN_PERSONAL_TARGET = os.getenv("ADMIN_PERSONAL_TARGET")
+FCIS_API_BASE = os.getenv("FCIS_API_BASE") or "http://fcishub.runasp.net/api"
+FCIS_ADMIN_EMAIL = os.getenv("FCIS_ADMIN_EMAIL") or "Nofal@std.mans.edu.eg"
+FCIS_ADMIN_PASSWORD = os.getenv("FCIS_ADMIN_PASSWORD") or "Abdulrhman@2026"
+ADMIN_PERSONAL_TARGET = os.getenv("ADMIN_PERSONAL_TARGET") or "+201027545916"
 
 TEMP_DIR = os.path.join(os.path.dirname(__file__), "downloads_temp")
 os.makedirs(TEMP_DIR, exist_ok=True)

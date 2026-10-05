@@ -29,10 +29,10 @@ jobs:
           TG_API_HASH: ${{ secrets.TG_API_HASH }}
           TG_PHONE: ${{ secrets.TG_PHONE }}
           TG_SESSION_STRING: ${{ secrets.TG_SESSION_STRING }}
-          TG_COMMUNITY: ${{ secrets.TG_COMMUNITY || 'FCISCommunity29' }}
-          FCIS_API_BASE: ${{ secrets.FCIS_API_BASE || 'http://fcishub.runasp.net/api' }}
-          FCIS_ADMIN_EMAIL: ${{ secrets.FCIS_ADMIN_EMAIL || 'admin@mans.edu.eg' }}
-          FCIS_ADMIN_PASSWORD: ${{ secrets.FCIS_ADMIN_PASSWORD || 'Admin@123456' }}
-          ADMIN_PERSONAL_TARGET: ${{ secrets.ADMIN_PERSONAL_TARGET || '+201027545916' }}
+          TG_COMMUNITY: ${{ secrets.TG_COMMUNITY }}
+          FCIS_API_BASE: ${{ secrets.FCIS_API_BASE }}
+          FCIS_ADMIN_EMAIL: ${{ secrets.FCIS_ADMIN_EMAIL }}
+          FCIS_ADMIN_PASSWORD: ${{ secrets.FCIS_ADMIN_PASSWORD }}
+          ADMIN_PERSONAL_TARGET: ${{ secrets.ADMIN_PERSONAL_TARGET }}
         run: |
           python main.py

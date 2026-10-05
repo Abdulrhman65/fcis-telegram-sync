@@ -22,12 +22,12 @@ class FcisApiClient:
 
     def login(self) -> bool:
         url = f"{self.base_url}/auth/login"
-        payload = {"email": self.email, "password": self.password}
+        payload = {"universityEmail": self.email, "password": self.password}
         try:
             resp = requests.post(url, json=payload, timeout=15)
             if resp.status_code == 200:
                 data = resp.json()
-                self.token = data.get("data", {}).get("token") or data.get("token")
+                self.token = data.get("data", {}).get("accessToken") or data.get("accessToken") or data.get("data", {}).get("token") or data.get("token")
                 logger.info("Successfully authenticated with FCIS Hub API.")
                 return True
             else:

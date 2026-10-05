@@ -1,0 +1,15 @@
+# Environment & secrets
+.env
+*.session
+*.session-journal
+
+# Database & temp files
+*.db
+*.db-journal
+downloads_temp/
+approved_*.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/

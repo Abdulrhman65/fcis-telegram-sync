@@ -1,0 +1,217 @@
+import os
+import sys
+import json
+import argparse
+import asyncio
+import logging
+from dotenv import load_dotenv
+from telethon import TelegramClient, events
+
+from database import init_db, is_already_synced, record_synced
+from parser import parse_overview_message, extract_subject_info
+from fcis_api import FcisApiClient
+
+logging.basicConfig(
+    format="%(asctime)s - [%(levelname)s] - %(name)s: %(message)s",
+    level=logging.INFO
+)
+logger = logging.getLogger("TelegramSync")
+
+load_dotenv()
+
+TG_API_ID = os.getenv("TG_API_ID")
+TG_API_HASH = os.getenv("TG_API_HASH")
+TG_PHONE = os.getenv("TG_PHONE")
+TG_COMMUNITY = os.getenv("TG_COMMUNITY", "FCISCommunity29")
+
+FCIS_API_BASE = os.getenv("FCIS_API_BASE", "http://localhost:5000/api")
+FCIS_ADMIN_EMAIL = os.getenv("FCIS_ADMIN_EMAIL")
+FCIS_ADMIN_PASSWORD = os.getenv("FCIS_ADMIN_PASSWORD")
+ADMIN_PERSONAL_TARGET = os.getenv("ADMIN_PERSONAL_TARGET")
+
+TEMP_DIR = os.path.join(os.path.dirname(__file__), "downloads_temp")
+os.makedirs(TEMP_DIR, exist_ok=True)
+
+async def send_admin_alert(client: TelegramClient, message_text: str):
+    if not ADMIN_PERSONAL_TARGET:
+        return
+    try:
+        target = ADMIN_PERSONAL_TARGET.strip()
+        if target.lstrip("-").isdigit():
+            target = int(target)
+        await client.send_message(target, message_text)
+    except Exception as e:
+        logger.warning("Could not send alert to %s: %s", ADMIN_PERSONAL_TARGET, e)
+
+async def scan_overview_items(client: TelegramClient, api_client: FcisApiClient, community_entity, limit: int = 100):
+    discovered = []
+    
+    async for msg in client.iter_messages(community_entity, limit=limit):
+        text = msg.text or ""
+        if "رسالة مجمعة" not in text and "Lectures" not in text:
+            continue
+
+        items = parse_overview_message(text, msg.entities)
+        subject_info = extract_subject_info(text)
+        if not items:
+            continue
+
+        chat = await msg.get_chat()
+
+        for item in items:
+            topic_id = str(item["topic_id"])
+            msg_id = item["message_id"]
+
+            if is_already_synced(topic_id, msg_id):
+                continue
+
+            # Fetch metadata of target file
+            target_msg = await client.get_messages(chat, ids=msg_id)
+            if not target_msg or not target_msg.media:
+                continue
+
+            file_name = getattr(target_msg.file, 'name', None) or f"{item['title']}.pdf"
+            file_size = getattr(target_msg.file, 'size', 0)
+            
+            subject_id = api_client.resolve_subject_id(topic_id, subject_info.get("name"))
+
+            discovered.append({
+                "messageId": msg_id,
+                "topicId": topic_id,
+                "title": item["title"],
+                "type": item["type"],
+                "subjectId": subject_id,
+                "subjectName": subject_info.get("name") or f"Topic {topic_id}",
+                "originalFileName": file_name,
+                "fileSize": file_size
+            })
+
+    return discovered
+
+async def sync_approved_items(client: TelegramClient, api_client: FcisApiClient, community_entity, items_to_sync):
+    uploaded = []
+    failed = []
+
+    for item in items_to_sync:
+        msg_id = item["messageId"]
+        topic_id = str(item.get("topicId", "general"))
+        title = item["title"]
+        material_type = item["type"]
+        subject_id = int(item["subjectId"])
+        subject_name = item.get("subjectName", "")
+
+        try:
+            target_msg = await client.get_messages(community_entity, ids=msg_id)
+            if not target_msg or not target_msg.media:
+                logger.warning("Message %s has no file attached.", msg_id)
+                failed.append({"messageId": msg_id, "error": "No media found in message"})
+                continue
+
+            original_filename = getattr(target_msg.file, 'name', None) or f"{title}.pdf"
+            temp_file_path = os.path.join(TEMP_DIR, f"{msg_id}_{original_filename}")
+            
+            logger.info("Downloading file from Telegram (Msg: %s)...", msg_id)
+            downloaded_path = await client.download_media(target_msg, file=temp_file_path)
+
+            if not downloaded_path or not os.path.exists(downloaded_path):
+                failed.append({"messageId": msg_id, "error": "Download failed"})
+                continue
+
+            logger.info("Uploading %s to FCIS Hub API (Subject: %s)...", title, subject_id)
+            upload_result = api_client.upload_material(downloaded_path, title, material_type, subject_id)
+
+            if upload_result:
+                fcis_mat_id = upload_result.get("id")
+                record_synced(topic_id, msg_id, material_type, title, subject_id, fcis_mat_id, original_filename)
+                uploaded.append({"messageId": msg_id, "title": title, "fcisId": fcis_mat_id})
+
+                alert_text = (
+                    f"✅ **تم نشر ملف جديد بنجاح في FCIS Hub!**\n\n"
+                    f"📌 **العنوان:** `{title}`\n"
+                    f"📚 **المادة:** {subject_name or subject_id}\n"
+                    f"🏷️ **النوع:** {material_type}\n"
+                    f"📄 **الملف:** `{original_filename}`"
+                )
+                await send_admin_alert(client, alert_text)
+            else:
+                failed.append({"messageId": msg_id, "error": "API upload rejected"})
+
+            if os.path.exists(downloaded_path):
+                try: os.remove(downloaded_path)
+                except Exception: pass
+
+        except Exception as e:
+            logger.error("Error processing item %s: %s", title, e, exc_info=True)
+            failed.append({"messageId": msg_id, "error": str(e)})
+
+    # Summary alert
+    if uploaded:
+        summary_text = (
+            f"📊 **تقرير المزامنة والتأكيد**\n\n"
+            f"✅ **تم نشر:** {len(uploaded)} ملفات بنجاح في المنصة.\n"
+            f"❌ **أخطاء:** {len(failed)}"
+        )
+        await send_admin_alert(client, summary_text)
+
+    return {"uploaded": uploaded, "failed": failed}
+
+async def main():
+    parser = argparse.ArgumentParser(description="FCIS Hub Telegram Sync Tool")
+    parser.add_argument("--scan-only", action="store_true", help="Scan and return discovered items as JSON to stdout")
+    parser.add_argument("--sync-items", type=str, help="JSON string or file path of approved items to upload")
+    parser.add_argument("--watch", action="store_true", help="Keep running 24/7 in real-time listener mode")
+    parser.add_argument("--limit", type=int, default=100, help="Number of recent messages to scan")
+    args = parser.parse_args()
+
+    if not TG_API_ID or not TG_API_HASH:
+        logger.error("Please set TG_API_ID and TG_API_HASH in .env file.")
+        print(json.dumps({"error": "Missing TG_API_ID or TG_API_HASH"}))
+        sys.exit(1)
+
+    init_db()
+
+    api_client = FcisApiClient(FCIS_API_BASE, FCIS_ADMIN_EMAIL, FCIS_ADMIN_PASSWORD)
+    api_client.login()
+
+    client = TelegramClient("userbot_session", int(TG_API_ID), TG_API_HASH)
+    await client.start(phone=TG_PHONE)
+
+    community_entity = await client.get_entity(TG_COMMUNITY)
+
+    # MODE 1: Scan Only (Returns JSON to caller)
+    if args.scan_only:
+        items = await scan_overview_items(client, api_client, community_entity, limit=args.limit)
+        # Output clean JSON token for backend parser
+        print("___TELEGRAM_SCAN_RESULT___")
+        print(json.dumps({"success": True, "items": items}, ensure_ascii=False))
+        await client.disconnect()
+        return
+
+    # MODE 2: Sync approved items from JSON
+    if args.sync_items:
+        raw_input = args.sync_items
+        if os.path.exists(raw_input):
+            with open(raw_input, "r", encoding="utf-8") as f:
+                items_to_sync = json.load(f)
+        else:
+            items_to_sync = json.loads(raw_input)
+
+        result = await sync_approved_items(client, api_client, community_entity, items_to_sync)
+        print("___TELEGRAM_SYNC_RESULT___")
+        print(json.dumps({"success": True, "result": result}, ensure_ascii=False))
+        await client.disconnect()
+        return
+
+    # MODE 3: Default On-Demand All
+    logger.info("Scanning for new items to sync...")
+    items = await scan_overview_items(client, api_client, community_entity, limit=args.limit)
+    if items:
+        logger.info("Found %d new items. Syncing...", len(items))
+        await sync_approved_items(client, api_client, community_entity, items)
+    else:
+        logger.info("All items are up to date! Nothing to sync.")
+
+    await client.disconnect()
+
+if __name__ == "__main__":
+    asyncio.run(main())

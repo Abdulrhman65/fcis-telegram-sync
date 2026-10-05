@@ -1,0 +1,11 @@
+{
+  "topics": {
+    "17": {
+      "subjectId": 1,
+      "subjectName": "Web Development",
+      "code": "WEB"
+    }
+  },
+  "auto_resolve_by_name": true,
+  "download_dir": "./downloads_temp"
+}
